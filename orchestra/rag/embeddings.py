@@ -11,7 +11,6 @@ needs — and it is fully deterministic and offline.
 from __future__ import annotations
 
 import hashlib
-import math
 import re
 from typing import List, Protocol, Sequence, runtime_checkable
 
