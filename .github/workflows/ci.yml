@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install lightweight dependencies (no heavy ML)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-min.txt
+          pip install ruff
+          pip install -e .
+
+      - name: Lint with ruff
+        run: ruff check orchestra tests
+
+      - name: Compile-check all modules
+        run: python -m compileall orchestra tests
+
+      - name: Run tests (fully offline — no API key, no network)
+        env:
+          OARAG_BACKEND: mock
+        run: pytest -q

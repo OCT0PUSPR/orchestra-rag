@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>orchestra-rag · multi-agent RAG</title>
+  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <span class="logo">◐</span>
+        <div>
+          <h1>orchestra-rag</h1>
+          <p class="tag">multi-agent orchestration · grounded by RAG</p>
+        </div>
+      </div>
+      <div class="status" id="status">
+        <span class="dot" id="statusDot"></span>
+        <span id="statusText">connecting…</span>
+      </div>
+    </header>
+
+    <main class="grid">
+      <!-- Left: knowledge base + controls -->
+      <section class="panel kb">
+        <h2>Knowledge base</h2>
+        <p class="muted" id="kbCount">— chunks indexed</p>
+
+        <label class="upload" id="dropZone">
+          <input type="file" id="fileInput" multiple
+                 accept=".txt,.md,.markdown,.html,.htm,.pdf" hidden />
+          <span class="upload-icon">⬆</span>
+          <span>Drop docs here or click to upload<br /><small>.txt .md .html .pdf</small></span>
+        </label>
+        <button class="btn ghost" id="uploadBtn">Build / extend KB</button>
+        <div class="upload-result muted" id="uploadResult"></div>
+
+        <h2 class="mt">Settings</h2>
+        <label class="field">
+          <span>Backend</span>
+          <select id="backend">
+            <option value="mock">mock (offline)</option>
+            <option value="anthropic">anthropic</option>
+            <option value="huggingface">huggingface</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Strategy</span>
+          <select id="strategy">
+            <option value="linear">linear pipeline</option>
+            <option value="blackboard">blackboard loop</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Top-k</span>
+          <input type="number" id="topk" value="4" min="1" max="12" />
+        </label>
+      </section>
+
+      <!-- Center: agent timeline -->
+      <section class="panel timeline-panel">
+        <div class="ask-row">
+          <input type="text" id="question"
+                 placeholder="Ask a question grounded in the knowledge base…"
+                 value="How long does the Atlas-7 battery last and how fast can it swap?" />
+          <button class="btn primary" id="askBtn">Ask agents</button>
+        </div>
+        <div class="timeline" id="timeline">
+          <div class="empty" id="emptyState">
+            The Planner, Researcher, Synthesizer, and Critic will collaborate here,
+            live, as they answer your question.
+          </div>
+        </div>
+      </section>
+
+      <!-- Right: final answer + citations -->
+      <section class="panel answer-panel">
+        <h2>Final answer</h2>
+        <div class="answer" id="answer">
+          <span class="muted">The grounded, cited answer will appear here.</span>
+        </div>
+        <h2 class="mt">Citations</h2>
+        <div class="citations" id="citations">
+          <span class="muted">Source chunks the answer relies on.</span>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

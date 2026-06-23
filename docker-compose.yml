@@ -1,0 +1,39 @@
+# orchestra-rag — app, plus an optional standalone Chroma service.
+#
+#   docker compose up app            # API + web UI on http://localhost:8000
+#   docker compose --profile chroma up   # also start a chromadb server
+#
+# The app defaults to the offline mock backend and the numpy store, so it works
+# with no API keys. Set ANTHROPIC_API_KEY (or HF_TOKEN) in a .env file and flip
+# OARAG_BACKEND to use a real LLM. To use the chroma service, set
+# OARAG_STORE=chroma and point the app at the chroma container.
+
+services:
+  app:
+    build: .
+    image: orchestra-rag:latest
+    ports:
+      - "8000:8000"
+    environment:
+      OARAG_BACKEND: ${OARAG_BACKEND:-mock}
+      OARAG_STRATEGY: ${OARAG_STRATEGY:-linear}
+      OARAG_STORE: ${OARAG_STORE:-numpy}
+      OARAG_K: ${OARAG_K:-4}
+      # Secrets pass through from your shell / .env if set; safe to leave unset.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      HF_TOKEN: ${HF_TOKEN:-}
+    volumes:
+      - ./storage:/app/storage
+    command: ["uvicorn", "orchestra.api.server:app", "--host", "0.0.0.0", "--port", "8000"]
+
+  # Optional: a standalone chromadb server. Enable with `--profile chroma`.
+  chroma:
+    image: chromadb/chroma:latest
+    profiles: ["chroma"]
+    ports:
+      - "8001:8000"
+    volumes:
+      - chroma-data:/chroma/chroma
+
+volumes:
+  chroma-data:
