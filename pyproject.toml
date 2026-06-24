@@ -126,3 +126,11 @@ exclude = "orchestra/ml/(transformer|bi_encoder|cross_encoder|train_biencoder|tr
 [[tool.mypy.overrides]]
 module = ["torch.*", "onnx.*", "onnxruntime.*", "tokenizers.*", "sentence_transformers.*", "chromadb.*"]
 ignore_missing_imports = true
+
+# numpy ships PEP 695 `type` statements in its py3.12 stubs that mypy rejects
+# under python_version = "3.9"; skip following numpy (and its stubs) entirely.
+[[tool.mypy.overrides]]
+module = ["numpy", "numpy.*"]
+follow_imports = "skip"
+follow_imports_for_stubs = true
+ignore_missing_imports = true
