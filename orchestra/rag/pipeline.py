@@ -13,7 +13,10 @@ from typing import Dict, List, Optional, Sequence
 
 from orchestra.rag.chunking import chunk_text
 from orchestra.rag.embeddings import Embedder, get_embedder
+from orchestra.rag.hybrid import hybrid_search
 from orchestra.rag.loaders import load_paths
+from orchestra.rag.rerank import Reranker
+from orchestra.rag.sparse import BM25Index
 from orchestra.rag.vectorstore import SearchResult, VectorStore, get_vector_store
 
 logger = logging.getLogger("orchestra.rag.pipeline")
@@ -47,11 +50,32 @@ class RAGPipeline:
         *,
         chunk_size: int = 180,
         overlap: int = 40,
+        reranker: Optional[Reranker] = None,
     ) -> None:
-        self.embedder: Embedder = embedder or get_embedder("auto")
-        self.store: VectorStore = store or get_vector_store("numpy")
+        # Use ``is None`` (not truthiness): a freshly-built store has __len__ == 0
+        # and is therefore *falsy*, so ``store or ...`` would wrongly discard it.
+        self.embedder: Embedder = embedder if embedder is not None else get_embedder("auto")
+        self.store: VectorStore = store if store is not None else get_vector_store("numpy")
         self.chunk_size = chunk_size
         self.overlap = overlap
+        self.reranker = reranker
+        # Sparse index + text/meta maps power hybrid (BM25 + dense) retrieval.
+        self._bm25 = BM25Index()
+        self._text_by_id: Dict[str, str] = {}
+        self._meta_by_id: Dict[str, Dict[str, object]] = {}
+
+    def _index_sparse(
+        self,
+        ids: Sequence[str],
+        texts: Sequence[str],
+        metas: Sequence[Dict[str, object]],
+    ) -> None:
+        for doc_id, text, meta in zip(ids, texts, metas):
+            if doc_id in self._text_by_id:
+                continue  # idempotent: skip already-indexed chunk ids
+            self._bm25.add(doc_id, text)
+            self._text_by_id[doc_id] = text
+            self._meta_by_id[doc_id] = dict(meta)
 
     # -- ingestion ---------------------------------------------------------
     def ingest(self, paths: Sequence[str | Path] | str | Path) -> int:
@@ -87,6 +111,7 @@ class RAGPipeline:
 
         embeddings = self.embedder.embed(all_texts)
         self.store.add(all_ids, embeddings, all_texts, all_meta)
+        self._index_sparse(all_ids, all_texts, all_meta)
         self.store.persist()
         logger.info("Ingested %d chunks from %d documents", len(all_texts), len(documents))
         return len(all_texts)
@@ -116,26 +141,62 @@ class RAGPipeline:
             return 0
         embeddings = self.embedder.embed(all_texts)
         self.store.add(all_ids, embeddings, all_texts, all_meta)
+        self._index_sparse(all_ids, all_texts, all_meta)
         self.store.persist()
         return len(all_texts)
 
     # -- retrieval ---------------------------------------------------------
-    def retrieve(self, query: str, k: int = 4) -> List[Passage]:
-        """Retrieve the top-``k`` passages for a query, numbered for citation."""
+    def retrieve(self, query: str, k: int = 4, *, hybrid: bool = False) -> List[Passage]:
+        """Retrieve the top-``k`` passages for a query, numbered for citation.
+
+        Args:
+            query: The user query.
+            k: Number of passages to return.
+            hybrid: If true, fuse dense + BM25 sparse retrieval (with optional
+                cross-encoder reranking). Otherwise use dense-only similarity.
+        """
         if not query.strip():
             return []
+        if hybrid:
+            return self._retrieve_hybrid(query, k)
         query_vec = self.embedder.embed([query])[0]
         hits: List[SearchResult] = self.store.similarity_search(query_vec, k=k)
+        return self._to_passages(
+            [(h.id, h.text, str(h.metadata.get("source", h.id)), h.score) for h in hits]
+        )
+
+    def _retrieve_hybrid(self, query: str, k: int) -> List[Passage]:
+        pool = max(k, 20)
+        query_vec = self.embedder.embed([query])[0]
+        dense_hits = self.store.similarity_search(query_vec, k=pool)
+        fused = hybrid_search(
+            dense_hits,
+            self._bm25,
+            query,
+            k=k,
+            candidate_pool=pool,
+            reranker=self.reranker,
+            text_by_id=self._text_by_id,
+            meta_by_id=self._meta_by_id,
+        )
+        return self._to_passages(
+            [
+                (f.doc_id, f.text, str(f.metadata.get("source", f.doc_id)), f.score)
+                for f in fused
+            ]
+        )
+
+    @staticmethod
+    def _to_passages(rows: List[tuple]) -> List[Passage]:
         passages: List[Passage] = []
-        for i, hit in enumerate(hits, start=1):
-            source = str(hit.metadata.get("source", hit.id))
+        for i, (chunk_id, text, source, score) in enumerate(rows, start=1):
             passages.append(
                 Passage(
                     citation=i,
-                    text=hit.text,
+                    text=text,
                     source=source,
-                    score=hit.score,
-                    chunk_id=hit.id,
+                    score=float(score),
+                    chunk_id=chunk_id,
                 )
             )
         return passages

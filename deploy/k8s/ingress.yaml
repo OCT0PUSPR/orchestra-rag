@@ -1,0 +1,19 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: orchestra-rag
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-buffering: "off" # required for SSE streaming
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+spec:
+  rules:
+    - host: orchestra-rag.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: orchestra-rag
+                port:
+                  number: 80

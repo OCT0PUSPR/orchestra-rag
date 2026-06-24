@@ -19,20 +19,26 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Install lightweight dependencies (no heavy ML)
+      - name: Install lightweight dependencies (no heavy ML / no torch)
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements-min.txt
-          pip install ruff
+          pip install ruff mypy bandit pytest-cov
           pip install -e .
 
       - name: Lint with ruff
-        run: ruff check orchestra tests
+        run: ruff check orchestra tests scripts
+
+      - name: Type-check with mypy
+        run: mypy orchestra
+
+      - name: Security scan with bandit
+        run: bandit -r orchestra -ll -q
 
       - name: Compile-check all modules
-        run: python -m compileall orchestra tests
+        run: python -m compileall orchestra tests scripts
 
-      - name: Run tests (fully offline — no API key, no network)
+      - name: Run tests + coverage (fully offline — no API key, no network, no torch)
         env:
           OARAG_BACKEND: mock
-        run: pytest -q
+        run: pytest --cov=orchestra --cov-report=term-missing --cov-fail-under=80 -q

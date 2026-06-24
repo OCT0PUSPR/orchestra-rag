@@ -20,12 +20,21 @@ import time
 from dataclasses import asdict, dataclass, field
 from typing import Dict, Iterator, List, Optional
 
-from orchestra.agents.base import AgentResult
+from orchestra.agents.base import Agent, AgentResult
 from orchestra.agents.roles import build_default_agents
 from orchestra.llm import LLMBackend
+from orchestra.observability import M, get_logger
 from orchestra.rag.pipeline import Passage, RAGPipeline
+from orchestra.reliability import (
+    Budget,
+    BudgetExceeded,
+    estimate_cost_usd,
+    estimate_tokens,
+)
 
 __all__ = ["Event", "OrchestratorResult", "Orchestrator"]
+
+_log = get_logger("orchestra.orchestrator")
 
 
 @dataclass
@@ -78,14 +87,30 @@ class Orchestrator:
         strategy: str = "linear",
         k: int = 4,
         max_rounds: int = 3,
-        agents: Optional[Dict[str, object]] = None,
+        hybrid: bool = False,
+        max_cost_usd: float = 1.0,
+        agents: Optional[Dict[str, Agent]] = None,
     ) -> None:
         self.llm = llm
         self.rag = rag
         self.strategy = strategy
         self.k = k
         self.max_rounds = max(1, max_rounds)
-        self.agents = agents or build_default_agents(llm, rag, k=k)
+        self.hybrid = hybrid
+        self.max_cost_usd = max_cost_usd
+        self.agents: Dict[str, Agent] = agents or build_default_agents(llm, rag, k=k, hybrid=hybrid)
+
+    def _charge_llm(self, role: str, prompt: str, output: str, budget: Budget) -> None:
+        """Estimate tokens/cost for one agent step, record metrics, and charge budget."""
+        in_tokens = estimate_tokens(prompt)
+        out_tokens = estimate_tokens(output)
+        backend = getattr(self.llm, "name", "mock")
+        cost = estimate_cost_usd(backend, in_tokens, out_tokens)
+        M.llm_tokens.labels(role=role, kind="input").inc(in_tokens)
+        M.llm_tokens.labels(role=role, kind="output").inc(out_tokens)
+        M.llm_cost.labels(backend=backend).inc(cost)
+        # Cost budget is advisory for the mock (cost 0); real backends enforce it.
+        budget.charge_cost(cost)
 
     # -- public API -------------------------------------------------------
     def run(self, question: str) -> OrchestratorResult:
@@ -133,20 +158,31 @@ class Orchestrator:
             )
         )
 
-        # 3. Synthesize -> 4. Critic -> revise loop
+        # 3. Synthesize -> 4. Critic -> revise loop (under a per-query budget)
+        budget = Budget(max_rounds=self.max_rounds, max_cost_usd=self.max_cost_usd)
         evidence = research.content
         answer = ""
         approved = False
         rounds = 0
+        budget_hit = False
         for rnd in range(1, self.max_rounds + 1):
             rounds = rnd
+            try:
+                budget.charge_round()
+            except BudgetExceeded as exc:
+                budget_hit = True
+                yield emit(Event(type="budget", round=rnd, content=str(exc)))
+                break
             yield emit(Event(type="round", round=rnd, metadata={"strategy": "linear"}))
+            # Heartbeat so long-running streams keep the connection warm.
+            yield emit(Event(type="heartbeat", round=rnd))
 
             yield emit(Event(type="agent_start", role="synthesizer", round=rnd))
             synth = self.agents["synthesizer"].run(
                 question, passages=passages, evidence=evidence
             )
             answer = synth.content
+            self._charge_llm("synthesizer", evidence + question, answer, budget)
             yield emit(
                 Event(type="agent_message", role="synthesizer", content=answer, round=rnd)
             )
@@ -155,6 +191,7 @@ class Orchestrator:
             critique = self.agents["critic"].run(
                 question, draft=answer, passages=passages
             )
+            self._charge_llm("critic", answer, critique.content, budget)
             approved = bool(critique.metadata.get("approved"))
             yield emit(
                 Event(
@@ -170,6 +207,8 @@ class Orchestrator:
             # Feed the critique back into the evidence for the next revision.
             evidence = f"{research.content}\n\nCritic feedback to address:\n{critique.content}"
 
+        M.query_rounds.observe(rounds)
+        _log.info("linear_run_complete", rounds=rounds, approved=approved, budget_hit=budget_hit)
         result = OrchestratorResult(
             question=question,
             answer=answer,

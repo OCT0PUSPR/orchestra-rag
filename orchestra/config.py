@@ -42,18 +42,33 @@ if _HAS_PYDANTIC_SETTINGS:
 
         # Retrieval
         k: int = Field(default=4, description="Number of passages to retrieve")
-        embedder: str = Field(default="auto", description="auto | hashing | sentence-transformers")
+        embedder: str = Field(
+            default="auto", description="auto | hashing | ml | sentence-transformers"
+        )
         embedder_dimension: int = Field(default=512)
-        store: str = Field(default="numpy", description="numpy | chroma")
+        store: str = Field(default="numpy", description="numpy | hnsw | chroma | pgvector | qdrant")
         chunk_size: int = Field(default=180)
         chunk_overlap: int = Field(default=40)
+        hybrid: bool = Field(default=True, description="Fuse dense + BM25 sparse retrieval")
+        rerank: bool = Field(
+            default=False, description="Cross-encoder reranking (from-scratch ML or sentence-transformers)"
+        )
 
         # Orchestration
         strategy: str = Field(default="linear", description="linear | blackboard")
         max_rounds: int = Field(default=3, description="Max critic/revision rounds")
+        max_cost_usd: float = Field(default=1.0, description="Per-query cost budget (USD)")
+
+        # Security / API
+        require_auth: bool = Field(default=False, description="Require X-API-Key on the API")
+        cors_origins: str = Field(default="*", description="Comma-separated CORS allowlist")
+        rate_limit_per_minute: int = Field(default=60, description="Requests/min per API key")
+        max_upload_bytes: int = Field(default=10 * 1024 * 1024, description="Max upload size per file")
+        max_upload_files: int = Field(default=20, description="Max files per upload")
 
         # Persistence
         storage_dir: str = Field(default="storage")
+        database_url: str = Field(default="sqlite:///./orchestra.sqlite")
 
         # Secrets (read from conventional env vars, not OARAG_-prefixed).
         anthropic_api_key: Optional[str] = Field(default=None, alias="ANTHROPIC_API_KEY")
@@ -80,9 +95,18 @@ else:  # pragma: no cover - exercised only without pydantic-settings
         store: str = os.environ.get("OARAG_STORE", "numpy")
         chunk_size: int = int(os.environ.get("OARAG_CHUNK_SIZE", "180"))
         chunk_overlap: int = int(os.environ.get("OARAG_CHUNK_OVERLAP", "40"))
+        hybrid: bool = os.environ.get("OARAG_HYBRID", "true").lower() in ("1", "true", "yes")
+        rerank: bool = os.environ.get("OARAG_RERANK", "false").lower() in ("1", "true", "yes")
         strategy: str = os.environ.get("OARAG_STRATEGY", "linear")
         max_rounds: int = int(os.environ.get("OARAG_MAX_ROUNDS", "3"))
+        max_cost_usd: float = float(os.environ.get("OARAG_MAX_COST_USD", "1.0"))
+        require_auth: bool = os.environ.get("OARAG_REQUIRE_AUTH", "false").lower() in ("1", "true", "yes")
+        cors_origins: str = os.environ.get("OARAG_CORS_ORIGINS", "*")
+        rate_limit_per_minute: int = int(os.environ.get("OARAG_RATE_LIMIT_PER_MINUTE", "60"))
+        max_upload_bytes: int = int(os.environ.get("OARAG_MAX_UPLOAD_BYTES", str(10 * 1024 * 1024)))
+        max_upload_files: int = int(os.environ.get("OARAG_MAX_UPLOAD_FILES", "20"))
         storage_dir: str = os.environ.get("OARAG_STORAGE_DIR", "storage")
+        database_url: str = os.environ.get("OARAG_DATABASE_URL", "sqlite:///./orchestra.sqlite")
         anthropic_api_key: Optional[str] = os.environ.get("ANTHROPIC_API_KEY")
         hf_token: Optional[str] = os.environ.get("HF_TOKEN")
 

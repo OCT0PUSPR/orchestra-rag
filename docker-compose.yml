@@ -1,12 +1,23 @@
-# orchestra-rag — app, plus an optional standalone Chroma service.
+# orchestra-rag — full stack.
 #
-#   docker compose up app            # API + web UI on http://localhost:8000
-#   docker compose --profile chroma up   # also start a chromadb server
+#   docker compose up app                 # API + web UI on http://localhost:8000 (mock, numpy)
+#   docker compose --profile full up      # api + worker + redis + postgres(pgvector) + qdrant
 #
-# The app defaults to the offline mock backend and the numpy store, so it works
-# with no API keys. Set ANTHROPIC_API_KEY (or HF_TOKEN) in a .env file and flip
-# OARAG_BACKEND to use a real LLM. To use the chroma service, set
-# OARAG_STORE=chroma and point the app at the chroma container.
+# The app defaults to the offline mock backend + numpy store, so `up app` works
+# with no API keys. Set ANTHROPIC_API_KEY / HF_TOKEN in a .env file and flip
+# OARAG_BACKEND / OARAG_STORE to use real LLMs and a real vector store.
+
+x-app-env: &app-env
+  OARAG_BACKEND: ${OARAG_BACKEND:-mock}
+  OARAG_STRATEGY: ${OARAG_STRATEGY:-linear}
+  OARAG_STORE: ${OARAG_STORE:-numpy}
+  OARAG_HYBRID: ${OARAG_HYBRID:-true}
+  OARAG_K: ${OARAG_K:-4}
+  OARAG_REQUIRE_AUTH: ${OARAG_REQUIRE_AUTH:-false}
+  OARAG_DATABASE_URL: ${OARAG_DATABASE_URL:-sqlite:////app/storage/orchestra.sqlite}
+  OARAG_REDIS_URL: ${OARAG_REDIS_URL:-redis://redis:6379}
+  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+  HF_TOKEN: ${HF_TOKEN:-}
 
 services:
   app:
@@ -15,18 +26,64 @@ services:
     ports:
       - "8000:8000"
     environment:
-      OARAG_BACKEND: ${OARAG_BACKEND:-mock}
-      OARAG_STRATEGY: ${OARAG_STRATEGY:-linear}
-      OARAG_STORE: ${OARAG_STORE:-numpy}
-      OARAG_K: ${OARAG_K:-4}
-      # Secrets pass through from your shell / .env if set; safe to leave unset.
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      HF_TOKEN: ${HF_TOKEN:-}
+      <<: *app-env
     volumes:
       - ./storage:/app/storage
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health',timeout=3).status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     command: ["uvicorn", "orchestra.api.server:app", "--host", "0.0.0.0", "--port", "8000"]
 
-  # Optional: a standalone chromadb server. Enable with `--profile chroma`.
+  worker:
+    build: .
+    image: orchestra-rag:latest
+    profiles: ["full"]
+    environment:
+      <<: *app-env
+    volumes:
+      - ./storage:/app/storage
+    depends_on:
+      - redis
+    command: ["python", "-m", "orchestra.worker"]
+
+  redis:
+    image: redis:7-alpine
+    profiles: ["full"]
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    profiles: ["full"]
+    environment:
+      POSTGRES_USER: orchestra
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-orchestra}
+      POSTGRES_DB: orchestra
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U orchestra"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    profiles: ["full"]
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant-data:/qdrant/storage
+
   chroma:
     image: chromadb/chroma:latest
     profiles: ["chroma"]
@@ -36,4 +93,6 @@ services:
       - chroma-data:/chroma/chroma
 
 volumes:
+  pg-data:
+  qdrant-data:
   chroma-data:

@@ -8,7 +8,7 @@ correctness.
 
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from orchestra.agents.base import Agent, AgentResult
 from orchestra.llm import LLMBackend
@@ -37,7 +37,7 @@ class PlannerAgent(Agent):
             "Keep it to at most five steps. Do not answer the question yourself."
         )
 
-    def run(self, task: str, *, scratchpad: Optional[str] = None) -> AgentResult:
+    def run(self, task: str, **kwargs: object) -> AgentResult:
         prompt = f"QUESTION: {task}\n\nProduce the plan."
         content = self.complete(prompt)
         return AgentResult(role=self.role, content=content)
@@ -48,9 +48,18 @@ class ResearcherAgent(Agent):
 
     role = "researcher"
 
-    def __init__(self, llm: LLMBackend, *, rag: Optional[RAGPipeline] = None, k: int = 4, **kw) -> None:
+    def __init__(
+        self,
+        llm: LLMBackend,
+        *,
+        rag: Optional[RAGPipeline] = None,
+        k: int = 4,
+        hybrid: bool = False,
+        **kw,
+    ) -> None:
         super().__init__(llm, rag=rag, **kw)
         self.k = k
+        self.hybrid = hybrid
 
     def default_system_prompt(self) -> str:
         return (
@@ -61,8 +70,8 @@ class ResearcherAgent(Agent):
             "Never invent facts that are not in the context."
         )
 
-    def run(self, task: str, *, scratchpad: Optional[str] = None) -> AgentResult:
-        passages: List[Passage] = self.retrieve(task, k=self.k)
+    def run(self, task: str, **kwargs: object) -> AgentResult:
+        passages: List[Passage] = self.retrieve(task, k=self.k, hybrid=self.hybrid)
         context = RAGPipeline.build_context(passages)
         prompt = f"QUESTION: {task}\n\nCONTEXT:\n{context}"
         content = self.complete(prompt)
@@ -83,8 +92,9 @@ class CoderAgent(Agent):
             "If the task does not require code, say so briefly."
         )
 
-    def run(self, task: str, *, scratchpad: Optional[str] = None) -> AgentResult:
-        context = scratchpad or ""
+    def run(self, task: str, **kwargs: object) -> AgentResult:
+        scratchpad = kwargs.get("scratchpad")
+        context = scratchpad if isinstance(scratchpad, str) else ""
         prompt = f"QUESTION: {task}\n\nCONTEXT:\n{context}"
         content = self.complete(prompt)
         return AgentResult(role=self.role, content=content)
@@ -105,19 +115,15 @@ class SynthesizerAgent(Agent):
             "plainly rather than guessing."
         )
 
-    def run(
-        self,
-        task: str,
-        *,
-        scratchpad: Optional[str] = None,
-        passages: Optional[List[Passage]] = None,
-        evidence: str = "",
-    ) -> AgentResult:
-        passages = passages or []
+    def run(self, task: str, **kwargs: object) -> AgentResult:
+        raw_passages = kwargs.get("passages")
+        passages: List[Passage] = list(raw_passages) if isinstance(raw_passages, list) else []
+        evidence = kwargs.get("evidence")
+        evidence_str = evidence if isinstance(evidence, str) else ""
         context = RAGPipeline.build_context(passages)
         prompt = (
             f"QUESTION: {task}\n\n"
-            f"EVIDENCE:\n{evidence}\n\n"
+            f"EVIDENCE:\n{evidence_str}\n\n"
             f"CONTEXT:\n{context}"
         )
         content = self.complete(prompt)
@@ -139,19 +145,15 @@ class CriticAgent(Agent):
             "problems to fix."
         )
 
-    def run(
-        self,
-        task: str,
-        *,
-        scratchpad: Optional[str] = None,
-        draft: str = "",
-        passages: Optional[List[Passage]] = None,
-    ) -> AgentResult:
-        passages = passages or []
+    def run(self, task: str, **kwargs: object) -> AgentResult:
+        raw_passages = kwargs.get("passages")
+        passages: List[Passage] = list(raw_passages) if isinstance(raw_passages, list) else []
+        draft = kwargs.get("draft")
+        draft_str = draft if isinstance(draft, str) else ""
         context = RAGPipeline.build_context(passages)
         prompt = (
             f"QUESTION: {task}\n\n"
-            f"DRAFT:\n{draft}\n\n"
+            f"DRAFT:\n{draft_str}\n\n"
             f"CONTEXT:\n{context}"
         )
         content = self.complete(prompt)
@@ -169,11 +171,12 @@ def build_default_agents(
     rag: RAGPipeline,
     *,
     k: int = 4,
-) -> dict:
+    hybrid: bool = False,
+) -> "Dict[str, Agent]":
     """Construct one instance of every default role, wired to ``llm`` and ``rag``."""
     return {
         "planner": PlannerAgent(llm, rag=rag),
-        "researcher": ResearcherAgent(llm, rag=rag, k=k),
+        "researcher": ResearcherAgent(llm, rag=rag, k=k, hybrid=hybrid),
         "coder": CoderAgent(llm, rag=rag),
         "synthesizer": SynthesizerAgent(llm, rag=rag),
         "critic": CriticAgent(llm, rag=rag),

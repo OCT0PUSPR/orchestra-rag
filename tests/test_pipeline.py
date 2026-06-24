@@ -2,11 +2,24 @@
 
 from __future__ import annotations
 
+from orchestra.rag.embeddings import HashingEmbedder
 from orchestra.rag.pipeline import RAGPipeline
+from orchestra.rag.vectorstore import NumpyStore
 
 
 def test_ingest_loads_chunks(ingested_pipeline: RAGPipeline):
     assert len(ingested_pipeline) > 0
+
+
+def test_explicit_empty_store_is_not_replaced():
+    """Regression: a freshly-built store has len()==0 (falsy); the pipeline must
+    keep the *provided* store instead of silently swapping in the default. This
+    guards the ``store if store is not None`` fix (an empty HNSW/Numpy store was
+    being discarded by the old ``store or get_vector_store(...)``).
+    """
+    sentinel = NumpyStore()
+    pipe = RAGPipeline(embedder=HashingEmbedder(dimension=64), store=sentinel)
+    assert pipe.store is sentinel
 
 
 def test_retrieve_battery_question(ingested_pipeline: RAGPipeline):

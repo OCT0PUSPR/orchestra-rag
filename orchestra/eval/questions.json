@@ -1,0 +1,65 @@
+{
+  "description": "Labeled evaluation set over the bundled Nimbus Robotics corpus. Each question lists the source document(s) that contain the answer (relevant_sources) and answer keywords that a grounded answer must contain.",
+  "questions": [
+    {
+      "id": "battery",
+      "question": "How long does the Atlas-7 battery last and how fast can it swap?",
+      "relevant_sources": ["product_atlas7.md"],
+      "answer_keywords": ["9 hours", "30 seconds"]
+    },
+    {
+      "id": "payload",
+      "question": "What is the maximum payload of the Atlas-7?",
+      "relevant_sources": ["product_atlas7.md"],
+      "answer_keywords": ["35"]
+    },
+    {
+      "id": "collisions",
+      "question": "How does Conductor prevent collisions and deadlocks?",
+      "relevant_sources": ["conductor_platform.md"],
+      "answer_keywords": ["reservation", "cells"]
+    },
+    {
+      "id": "api_auth",
+      "question": "How does the Conductor API authenticate requests?",
+      "relevant_sources": ["conductor_platform.md"],
+      "answer_keywords": ["API key", "bearer"]
+    },
+    {
+      "id": "languages",
+      "question": "What programming languages are approved for production at Nimbus?",
+      "relevant_sources": ["engineering_handbook.md"],
+      "answer_keywords": ["Rust", "Python", "TypeScript"]
+    },
+    {
+      "id": "review",
+      "question": "How many approvals does a safety-critical firmware change require?",
+      "relevant_sources": ["engineering_handbook.md"],
+      "answer_keywords": ["two", "Controls"]
+    },
+    {
+      "id": "parental",
+      "question": "How much parental leave do employees get?",
+      "relevant_sources": ["hr_policies.md"],
+      "answer_keywords": ["18 weeks"]
+    },
+    {
+      "id": "vacation",
+      "question": "How many vacation days do full-time employees receive?",
+      "relevant_sources": ["hr_policies.md"],
+      "answer_keywords": ["25 days"]
+    },
+    {
+      "id": "hq",
+      "question": "Where is Nimbus Robotics headquartered?",
+      "relevant_sources": ["company_overview.md"],
+      "answer_keywords": ["Portland"]
+    },
+    {
+      "id": "funding",
+      "question": "How much funding has Nimbus raised in total?",
+      "relevant_sources": ["company_overview.md"],
+      "answer_keywords": ["145 million"]
+    }
+  ]
+}

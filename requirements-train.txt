@@ -1,0 +1,16 @@
+# Training / from-scratch ML dependencies for orchestra/ml.
+#
+# These are NOT needed to run the offline demo, CLI, API, or the full offline
+# test suite (those use the zero-dependency HashingEmbedder + NumpyStore). Install
+# this file only to TRAIN the from-scratch bi-encoder / cross-encoder, build the
+# HNSW index from real embeddings, run the ML eval harness, or export to ONNX:
+#
+#     pip install -r requirements-min.txt -r requirements-train.txt
+#     python scripts/train_ml.py
+#
+torch>=2.2.0           # the only deep-learning framework we use; models are from scratch
+numpy>=1.24.0
+tokenizers>=0.15.0     # BPE algorithm ONLY (merge training + byte-level pretokenizer)
+onnx>=1.15.0           # bi-encoder ONNX export
+onnxruntime>=1.17.0    # ONNX parity verification / CPU inference
+requests>=2.31.0       # (optional) HTTP utilities

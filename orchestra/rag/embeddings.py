@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from typing import List, Protocol, Sequence, runtime_checkable
+from typing import List, Optional, Protocol, Sequence, runtime_checkable
 
 import numpy as np
 
@@ -70,7 +70,10 @@ class HashingEmbedder:
         return self._dimension
 
     def _hash(self, token: str) -> tuple[int, float]:
-        digest = hashlib.md5(token.encode("utf-8")).digest()
+        # MD5 here is a fast, stable, NON-cryptographic hash for the feature-
+        # hashing trick — not a security primitive. usedforsecurity=False makes
+        # that explicit (and keeps it working under FIPS).
+        digest = hashlib.md5(token.encode("utf-8"), usedforsecurity=False).digest()
         bucket = int.from_bytes(digest[:4], "little") % self._dimension
         sign = 1.0 if digest[4] & 1 else -1.0
         return bucket, sign
@@ -120,8 +123,9 @@ class STEmbedder:
                 "`pip install sentence-transformers`, or use the HashingEmbedder "
                 "fallback (set OARAG_EMBEDDER=hashing)."
             ) from exc
-        self._model = SentenceTransformer(self._model_name)
-        self._dimension = int(self._model.get_sentence_embedding_dimension())
+        model = SentenceTransformer(self._model_name)
+        self._model = model
+        self._dimension = int(model.get_sentence_embedding_dimension())
 
     @property
     def dimension(self) -> int:
@@ -141,6 +145,22 @@ class STEmbedder:
         return np.asarray(vectors, dtype=np.float32)
 
 
+def _ml_embedder() -> Optional["Embedder"]:
+    """Return the from-scratch ML bi-encoder embedder if torch + a trained
+    checkpoint are both available, else ``None``. Never imports torch unless a
+    checkpoint exists, so the zero-dependency path stays clean.
+    """
+    try:
+        from orchestra.ml import has_torch
+        from orchestra.ml.adapters import MLEmbedder, checkpoints_present
+
+        if has_torch() and checkpoints_present():
+            return MLEmbedder()
+    except Exception:  # pragma: no cover - any import/availability failure
+        return None
+    return None
+
+
 def get_embedder(
     kind: str = "auto",
     *,
@@ -150,18 +170,28 @@ def get_embedder(
     """Construct an embedder.
 
     Args:
-        kind: ``"hashing"``, ``"sentence-transformers"`` (aka ``"st"``), or
-            ``"auto"``. ``"auto"`` uses sentence-transformers if importable and
-            quietly falls back to the hashing embedder otherwise.
+        kind: ``"hashing"``, ``"ml"`` (the from-scratch bi-encoder),
+            ``"sentence-transformers"`` (aka ``"st"``), or ``"auto"``.
+            ``"auto"`` prefers the trained from-scratch bi-encoder when torch and
+            a checkpoint are present, otherwise sentence-transformers if
+            importable, and finally falls back to the deterministic hashing
+            embedder — so RAG works with zero heavy dependencies.
         dimension: Dimension for the hashing embedder.
         model_name: Model id for the sentence-transformers backend.
     """
     kind = (kind or "auto").lower()
+    if kind in {"ml", "mlbiencoder", "biencoder"}:
+        from orchestra.ml.adapters import MLEmbedder
+
+        return MLEmbedder()
     if kind in {"st", "sentence-transformers", "sentencetransformers"}:
         return STEmbedder(model_name=model_name)
     if kind == "hashing":
         return HashingEmbedder(dimension=dimension)
     if kind == "auto":
+        ml = _ml_embedder()
+        if ml is not None:
+            return ml
         try:
             import sentence_transformers  # type: ignore  # noqa: F401
 

@@ -1,0 +1,13 @@
+apiVersion: v2
+name: orchestra-rag
+description: Multi-agent orchestration grounded by a shared RAG knowledge base.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - rag
+  - multi-agent
+  - llm
+home: https://github.com/OCT0PUSPR/orchestra-rag
+maintainers:
+  - name: OCT0PUSPR

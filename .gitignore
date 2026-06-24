@@ -40,8 +40,22 @@ storage/
 *.db
 *.npy
 
+# --- ML artifacts / datasets (never commit large weights or downloaded data) ---
+# Downloaded datasets, logs, scratch run outputs and scaled-up weights live here.
+artifacts/
+# Big model weights anywhere EXCEPT the tiny committed proof checkpoints
+# under orchestra/ml/checkpoints/ (kept <25MB so the ML path works out of the box).
+*.pt
+*.pth
+*.onnx
+*.ckpt
+*.safetensors
+!orchestra/ml/checkpoints/*.pt
+!orchestra/ml/checkpoints/*.onnx
+
 # --- Editors / OS ---
 .idea/
 .vscode/
 *.swp
 .DS_Store
+*.log

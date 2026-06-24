@@ -42,9 +42,20 @@ ml = [
     "transformers>=4.40.0",
     "torch>=2.2.0",
 ]
+# From-scratch ML training stack (orchestra.ml): torch + tokenizers (BPE only)
+# + onnx. Mirrors requirements-train.txt. No sentence-transformers/transformers.
+train = [
+    "torch>=2.2.0",
+    "tokenizers>=0.15.0",
+    "onnx>=1.15.0",
+    "onnxruntime>=1.17.0",
+]
 dev = [
     "pytest>=8.0.0",
+    "pytest-cov>=4.0.0",
     "ruff>=0.4.0",
+    "mypy>=1.8.0",
+    "bandit>=1.7.0",
 ]
 
 [project.scripts]
@@ -59,11 +70,40 @@ include = ["orchestra*"]
 
 [tool.setuptools.package-data]
 "orchestra.api" = ["web/*.html", "web/*.css", "web/*.js"]
+"orchestra.ml" = ["checkpoints/*.pt", "checkpoints/*.onnx", "checkpoints/*.json"]
+"orchestra.eval" = ["*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 addopts = "-q"
+
+[tool.coverage.run]
+source = ["orchestra"]
+omit = [
+    # The torch-only ML layer (from-scratch models + training + ONNX). This is
+    # the optional, heavy path: it requires torch and is exercised by the real
+    # `scripts/train_ml.py` run plus torch-gated tests in tests/test_ml.py. It is
+    # deliberately excluded from the coverage *gate*, which protects the runtime
+    # "core" (rag / agents / api / db / orchestrator / security / observability)
+    # that must hold >=80% even on the lightweight, no-torch CI path. The
+    # torch-free ML pieces (hnsw.py, eval.py metrics, data.py, adapters.py,
+    # device.py, tokenizer.py) stay measured.
+    "orchestra/ml/transformer.py",
+    "orchestra/ml/bi_encoder.py",
+    "orchestra/ml/cross_encoder.py",
+    "orchestra/ml/train_biencoder.py",
+    "orchestra/ml/train_cross.py",
+    "orchestra/ml/onnx_export.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+]
 
 [tool.ruff]
 line-length = 100
@@ -72,3 +112,17 @@ target-version = "py39"
 [tool.ruff.lint]
 select = ["E", "F", "I", "W"]
 ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.9"
+ignore_missing_imports = true
+warn_unused_ignores = false
+# The ML/training layer (orchestra.ml) interacts heavily with torch's dynamic
+# types through deferred imports; we type-check its adapters/data/device surface
+# but do not enforce strict torch-tensor typing inside the model/training
+# internals (transformer blocks, losses, training loops, ONNX export).
+exclude = "orchestra/ml/(transformer|bi_encoder|cross_encoder|train_biencoder|train_cross|eval|onnx_export)\\.py$"
+
+[[tool.mypy.overrides]]
+module = ["torch.*", "onnx.*", "onnxruntime.*", "tokenizers.*", "sentence_transformers.*", "chromadb.*"]
+ignore_missing_imports = true

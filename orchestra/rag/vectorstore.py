@@ -23,6 +23,8 @@ __all__ = [
     "get_vector_store",
 ]
 
+_HNSW_KINDS = {"hnsw", "hnsw-scratch"}
+
 
 @dataclass
 class StoredItem:
@@ -136,6 +138,19 @@ class NumpyStore:
         if len(ids) == 0:
             return
         normalized = _l2_normalize(np.asarray(embeddings, dtype=np.float32))
+
+        # If a previously-persisted matrix has a different embedding dimension
+        # (e.g. the configured embedder changed), the old store is incompatible —
+        # reset rather than crash with a broadcast error.
+        if self._matrix is not None and self._matrix.shape[1] != normalized.shape[1]:
+            logger.warning(
+                "NumpyStore embedding dim changed (%d -> %d); resetting store",
+                self._matrix.shape[1],
+                normalized.shape[1],
+            )
+            self._ids, self._texts, self._metadatas = [], [], []
+            self._matrix = None
+            self._id_to_row = {}
 
         for offset, item_id in enumerate(ids):
             row_vec = normalized[offset : offset + 1]
@@ -295,6 +310,11 @@ def get_vector_store(
     kind = (kind or "numpy").lower()
     if kind == "numpy":
         return NumpyStore(persist_dir=persist_dir)
+    if kind in _HNSW_KINDS:
+        # From-scratch HNSW index (pure numpy; no torch required).
+        from orchestra.ml.adapters import HNSWStore
+
+        return HNSWStore(persist_dir=persist_dir)
     if kind in {"chroma", "chromadb"}:
         return ChromaStore(persist_dir=persist_dir, collection_name=collection_name)
     raise ValueError(f"Unknown vector store kind: {kind!r}")

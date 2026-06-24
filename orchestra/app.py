@@ -13,6 +13,7 @@ from orchestra.llm import LLMBackend, get_llm
 from orchestra.orchestrator import Orchestrator
 from orchestra.rag.embeddings import get_embedder
 from orchestra.rag.pipeline import RAGPipeline
+from orchestra.rag.rerank import get_reranker
 from orchestra.rag.vectorstore import get_vector_store
 
 __all__ = ["build_pipeline", "build_llm", "build_orchestrator", "default_corpus_dir"]
@@ -23,6 +24,23 @@ def default_corpus_dir() -> Path:
     return Path(__file__).resolve().parent.parent / "data" / "sample_corpus"
 
 
+def _resolve_store_kind(kind: str) -> str:
+    """Resolve ``store="auto"`` to the from-scratch HNSW index when the ML stack
+    is available, otherwise the always-available numpy store.
+    """
+    if kind != "auto":
+        return kind
+    try:
+        from orchestra.ml import has_torch
+        from orchestra.ml.adapters import checkpoints_present
+
+        if has_torch() and checkpoints_present():
+            return "hnsw"
+    except Exception:  # pragma: no cover - availability failure
+        pass
+    return "numpy"
+
+
 def build_pipeline(settings: Optional[Settings] = None) -> RAGPipeline:
     """Construct a RAG pipeline from settings (no persistence by default)."""
     settings = settings or load_settings()
@@ -30,18 +48,21 @@ def build_pipeline(settings: Optional[Settings] = None) -> RAGPipeline:
         settings.embedder,
         dimension=settings.embedder_dimension,
     )
+    store_kind = _resolve_store_kind(settings.store)
     persist_dir = None
-    if settings.store == "numpy" and settings.storage_dir:
+    if store_kind == "numpy" and settings.storage_dir:
         persist_dir = str(Path(settings.storage_dir) / "numpy")
     store = get_vector_store(
-        settings.store,
-        persist_dir=persist_dir if settings.store != "numpy" or settings.storage_dir else None,
+        store_kind,
+        persist_dir=persist_dir if store_kind != "numpy" or settings.storage_dir else None,
     )
+    reranker = get_reranker(enabled=settings.rerank)
     return RAGPipeline(
         embedder=embedder,
         store=store,
         chunk_size=settings.chunk_size,
         overlap=settings.chunk_overlap,
+        reranker=reranker,
     )
 
 
@@ -72,4 +93,6 @@ def build_orchestrator(
         strategy=settings.strategy,
         k=settings.k,
         max_rounds=settings.max_rounds,
+        hybrid=settings.hybrid,
+        max_cost_usd=settings.max_cost_usd,
     )

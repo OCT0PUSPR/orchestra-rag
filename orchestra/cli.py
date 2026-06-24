@@ -19,6 +19,7 @@ from typing import List, Optional
 
 from orchestra.app import build_orchestrator, build_pipeline, default_corpus_dir
 from orchestra.config import load_settings
+from orchestra.orchestrator import OrchestratorResult
 
 try:
     from rich.console import Console
@@ -97,7 +98,7 @@ def cmd_ask(args: argparse.Namespace) -> int:
     orch = build_orchestrator(rag, settings, backend=settings.backend)
 
     _plain(f"\n[bold]Question:[/bold] {args.question}\n" if _console else f"\nQuestion: {args.question}\n")
-    final = None
+    final: Optional[OrchestratorResult] = None
     for event in orch.stream(args.question):
         if event.type == "start":
             _plain(f"[dim]strategy={event.metadata.get('strategy')} backend={settings.backend}[/dim]"
@@ -108,7 +109,8 @@ def cmd_ask(args: argparse.Namespace) -> int:
             extra = " (APPROVED)" if event.metadata.get("approved") else ""
             _emit(event.role, event.content, title=f"{event.role}{extra}")
         elif event.type == "final":
-            final = event.metadata.get("result")
+            result_obj = event.metadata.get("result")
+            final = result_obj if isinstance(result_obj, OrchestratorResult) else None
 
     if final is not None:
         _plain("\n[bold green]Final answer:[/bold green]" if _console else "\nFinal answer:")
@@ -141,6 +143,26 @@ def cmd_demo(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_eval(args: argparse.Namespace) -> int:
+    """Run the RAG evaluation harness and print precision/recall/groundedness."""
+    from orchestra.eval import evaluate
+
+    settings = load_settings()
+    rag = build_pipeline(settings)
+    rag.ingest(default_corpus_dir())
+    _plain(f"Ingested bundled corpus: {len(rag)} chunks.\n")
+    for hybrid in (False, True):
+        result = evaluate(rag, k=args.k or 4, hybrid=hybrid)
+        _plain(result.summary())
+        if args.verbose:
+            for row in result.per_question:
+                _plain(
+                    f"  {row['id']:10s} P={row['precision']:.2f} R={row['recall']:.2f} "
+                    f"grounded={row['grounded']} cite_ok={row['citation_integrity']}"
+                )
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="orchestra", description="orchestra-rag CLI")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -155,6 +177,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_ask.add_argument("--backend", help="LLM backend (mock|anthropic|huggingface)")
     p_ask.add_argument("--strategy", help="Orchestration strategy (linear|blackboard)")
     p_ask.add_argument("--k", type=int, help="Number of passages to retrieve")
+    p_ask.add_argument("--hybrid", action="store_true", help="Use hybrid dense+BM25 retrieval")
     p_ask.add_argument(
         "--ingest",
         nargs="+",
@@ -164,6 +187,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_demo = sub.add_parser("demo", help="Run a canned offline demo (mock backend)")
     p_demo.set_defaults(func=cmd_demo)
+
+    p_eval = sub.add_parser("eval", help="Run the RAG evaluation harness")
+    p_eval.add_argument("--k", type=int, help="Top-k for retrieval metrics")
+    p_eval.add_argument("--verbose", action="store_true", help="Print per-question rows")
+    p_eval.set_defaults(func=cmd_eval)
 
     return parser
 

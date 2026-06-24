@@ -1,0 +1,46 @@
+replicaCount: 2
+
+image:
+  repository: orchestra-rag
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8000
+
+config:
+  backend: mock
+  strategy: linear
+  store: numpy
+  hybrid: true
+  requireAuth: true
+
+# Secrets are NOT set here. Provide them via an existing Secret named
+# `<release>-secrets` with keys: anthropic-api-key, hf-token, database-url.
+existingSecret: ""
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 256Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
+
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70
+
+ingress:
+  enabled: false
+  className: nginx
+  host: orchestra-rag.example.com
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+
+serviceMonitor:
+  enabled: false

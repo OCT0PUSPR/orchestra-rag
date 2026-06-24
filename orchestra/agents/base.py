@@ -62,11 +62,11 @@ class Agent:
         return f"ROLE: {self.role}\n\n{self._system_prompt}"
 
     # -- tools ------------------------------------------------------------
-    def retrieve(self, query: str, k: int = 4) -> List[Passage]:
+    def retrieve(self, query: str, k: int = 4, *, hybrid: bool = False) -> List[Passage]:
         """Tool: query the shared knowledge base for grounded passages."""
         if self.rag is None:
             return []
-        return self.rag.retrieve(query, k=k)
+        return self.rag.retrieve(query, k=k, hybrid=hybrid)
 
     # -- completion -------------------------------------------------------
     def complete(self, user_content: str) -> str:
@@ -78,7 +78,13 @@ class Agent:
         )
 
     # -- main entry point -------------------------------------------------
-    def run(self, task: str, *, scratchpad: Optional[str] = None) -> AgentResult:
-        """Execute the agent on a task. Subclasses override this."""
+    def run(self, task: str, **kwargs: object) -> AgentResult:
+        """Execute the agent on a task.
+
+        Subclasses override this and may accept extra keyword arguments
+        (``scratchpad``, ``draft``, ``evidence``, ``passages``, ...); the base
+        signature accepts ``**kwargs`` so every concrete role is signature-
+        compatible from the orchestrator's perspective.
+        """
         content = self.complete(task)
         return AgentResult(role=self.role, content=content)
